@@ -36,4 +36,5 @@ jobs:
           git add out/
           if git diff --cached --quiet; then echo "no change"; exit 0; fi
           git commit -m "scan $(python -c "import json;print(json.load(open('out/scan_latest.json',encoding='utf-8'))['date'])")"
-          git push
+          for i in 1 2 3; do git pull --rebase -q && git push && exit 0; echo "push retry $i"; sleep 10; done
+          exit 1

@@ -101,7 +101,7 @@ if __name__ == '__main__':
         ODIR = os.environ.get('SCAN_OUT_DIR') or os.path.join(os.path.expanduser('~'), 'OneDrive', 'Desktop', '여의도병하')
         os.makedirs(ODIR, exist_ok=True); YDB = os.path.join(ODIR, 'scan_latest.json')
         try:
-            js = dict(date=day, at=dt.datetime.now().strftime('%Y-%m-%d %H:%M'), scanned=len(tick), filters=f'주가 ${MINP} 이상 · 20일 평균 거래대금 ${MINDV/1e6:.0f}M 이상 · 레버리지/인버스 ETF 제외',
+            js = dict(date=day, at=dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y-%m-%d %H:%M'), scanned=len(tick), filters=f'주가 ${MINP} 이상 · 20일 평균 거래대금 ${MINDV/1e6:.0f}M 이상 · 레버리지/인버스 ETF 제외',
                       brk=brk, ret=ret)
             tmp = YDB + '.tmp'; open(tmp, 'w', encoding='utf-8').write(json.dumps(js, ensure_ascii=False)); os.replace(tmp, YDB); print('여의도병하 저장', YDB)
             # 브리핑용 짧은 글 (구글 드라이브에 올려서 아침·저녁 브리핑이 읽음)

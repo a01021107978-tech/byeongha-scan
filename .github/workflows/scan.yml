@@ -1,0 +1,39 @@
+# 병하 종목찾기: 미국 장 마감 뒤 미국 전 종목에서 돌파★·되돌림을 찾아 out/ 폴더에 저장 (노트북 없이 GitHub에서 실행)
+# 시간은 UTC. 21:20 UTC = 한국 06:20 (화~토). 미국 서머타임(마감 20:00 UTC)·조기폐장에도 이미 끝난 뒤.
+# 22:40 UTC에 한 번 더 (첫 실행이 늦거나 실패했을 때 대비, 같은 날짜면 커밋 안 함)
+name: scan
+on:
+  schedule:
+    - cron: '20 21 * * 1-5'
+    - cron: '40 22 * * 1-5'
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: scan
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run scanner
+        env:
+          SCAN_OUT_DIR: out
+          SCAN_THREADS: '8'
+          PYTHONIOENCODING: utf-8
+        run: |
+          for t in 1 2; do python scan_us.py && break; echo "retry $t"; sleep 60; done
+          test -s out/scan_latest.json
+      - name: Commit results
+        run: |
+          git config user.name "byeongha-scan-bot"
+          git config user.email "byeongha-scan-bot@users.noreply.github.com"
+          git add out/
+          if git diff --cached --quiet; then echo "no change"; exit 0; fi
+          git commit -m "scan $(python -c "import json;print(json.load(open('out/scan_latest.json',encoding='utf-8'))['date'])")"
+          git push

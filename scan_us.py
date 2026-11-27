@@ -17,6 +17,12 @@ BAD = ('warrant', 'right', 'unit', 'preferred', 'notes due', 'debenture', 'depos
        # 레버리지·인버스 ETF (개잡주·도박성 제외)
        ' 2x', ' 3x', '-2x', '-3x', '1.5x', '1.25x', '2x ', '3x ', 'ultra', 'leveraged', 'inverse', 'bear ', ' bull ', 'daily target', 'short ')
 MINP, MINDV = 10, 20e6   # 주가 $10 이상, 20일 평균 거래대금 $2천만 이상 (동전주·거래 적은 종목 제외)
+# 2026-11-28 '움직이는 종목만': 하루 평균 변동폭(ATR) 3.5% 이상 + 6개월(126봉) 상승률 +20% 이상
+# bt_tight.py 검증 (미국 2천여 종목, DEV/VAL × 2016 전/후 4칸 모두 기본보다 좋음):
+#   돌파★  평균 +1.2/+2.4/+0.6/+0.9% → +3.2/+5.5/+2.3/+3.1%, 20일 안 최고 상승 +7~8% → +13~17%
+#   되돌림 평균 +0.6/+1.0/+0.1/+0.7% → +1.4/+2.8/+0.9/+2.3%
+#   대형주만(거래대금 $100M↑, S&P500·나스닥100급)은 효과 없음 (VAL 앞 -0.5%) · 저변동(ATR 2%↓)이 '안 움직이는 종목'의 원인
+MINATR, MINR126 = 3.5, 0.20
 def symbols():
     S = {}
     for url, sc, nc, ec, tc in (('https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt', 0, 1, 6, 3),
@@ -55,9 +61,10 @@ def analyze(t):
         return None
     kij = mid(h, l, 26, i); stp = min(kij - 0.2*A[i], c[i] - 0.3*A[i]); R = c[i] - stp
     cloud = min((mid(h, l, 9, i-25) + mid(h, l, 26, i-25)) / 2, mid(h, l, 52, i-25))   # 완익(나머지 정리) 기준선 = 지금 구름 아래쪽
-    day = dt.datetime.fromtimestamp(T[i], dt.timezone.utc).strftime('%Y-%m-%d'); DATES.append(day)
+    day = dt.datetime.fromtimestamp(T[i], dt.timezone.utc).strftime('%Y-%m-%d'); DATES.append(day)   # 시세 받은 종목 수·기준일은 거름망 전에 셈
+    if A[i] / c[i] * 100 < MINATR or c[i] / c[i-126] - 1 < MINR126: return None   # 안 움직이는 종목·힘 없는 종목 제외 (v2026-11-28)
     base = dict(t=t, date=day, close=round(c[i], 2), stop=round(stp, 2), stop_pct=round(-R/c[i]*100, 1), half=round(c[i]+R, 2), half_pct=round(R/c[i]*100, 1), cloud=round(cloud, 2), cloud_pct=round((cloud/c[i]-1)*100, 1),
-                dvol_m=round(va(i)*c[i]/1e6, 1), atr_pct=round(A[i]/c[i]*100, 1))
+                dvol_m=round(va(i)*c[i]/1e6, 1), atr_pct=round(A[i]/c[i]*100, 1), r126=round((c[i]/c[i-126]-1)*100))
     out = []
     s = star(i)
     if s: out.append(dict(base, kind='돌파★★' if s[1] >= 3 else '돌파★', vol_x=round(s[1], 1), line=round(s[0], 2)))
@@ -94,14 +101,14 @@ if __name__ == '__main__':
     ret = sorted([x for x in res if x['kind'] == '되돌림' and x['date'] == day], key=lambda x: (x['star_kind'] != '★★', -x['stop_pct'] if False else abs(x['stop_pct'])))
     f = os.path.join(OUT, f'scan_{day}.csv' if len(sys.argv) == 1 else 'scan_tickers.csv')   # 종목 몇 개만 볼 땐 하루치 목록을 덮어쓰지 않음
     with open(f, 'w', newline='', encoding='utf-8-sig') as fo:
-        cols = ['kind', 't', 'name', 'etf', 'date', 'close', 'vol_x', 'line', 'stop', 'stop_pct', 'half', 'half_pct', 'cloud', 'cloud_pct', 'atr_pct', 'dvol_m', 'star_ago', 'star_kind']
+        cols = ['kind', 't', 'name', 'etf', 'date', 'close', 'vol_x', 'line', 'stop', 'stop_pct', 'half', 'half_pct', 'cloud', 'cloud_pct', 'atr_pct', 'r126', 'dvol_m', 'star_ago', 'star_kind']
         w = csv.DictWriter(fo, fieldnames=cols, extrasaction='ignore'); w.writeheader(); [w.writerow(x) for x in brk + ret]
     print(f'\n기준일 {day} · 돌파 {len(brk)}개 · 되돌림 {len(ret)}개 · {time.time()-t0:.0f}초 · 전체 목록 {f}')
     if len(sys.argv) == 1:   # 전체 검색이면 여의도병하 '종목 찾기' 탭용 파일도 저장 (GitHub에서는 SCAN_OUT_DIR 폴더에)
         ODIR = os.environ.get('SCAN_OUT_DIR') or os.path.join(os.path.expanduser('~'), 'OneDrive', 'Desktop', '여의도병하')
         os.makedirs(ODIR, exist_ok=True); YDB = os.path.join(ODIR, 'scan_latest.json')
         try:
-            js = dict(date=day, at=dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y-%m-%d %H:%M'), scanned=len(tick), filters=f'주가 ${MINP} 이상 · 20일 평균 거래대금 ${MINDV/1e6:.0f}M 이상 · 레버리지/인버스 ETF 제외',
+            js = dict(date=day, at=dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).strftime('%Y-%m-%d %H:%M'), scanned=len(tick), filters=f'주가 ${MINP} 이상 · 20일 평균 거래대금 ${MINDV/1e6:.0f}M 이상 · 하루 변동폭(ATR) {MINATR}% 이상 · 6개월 +{MINR126*100:.0f}% 이상 · 레버리지/인버스 ETF 제외',
                       brk=brk, ret=ret)
             tmp = YDB + '.tmp'; open(tmp, 'w', encoding='utf-8').write(json.dumps(js, ensure_ascii=False)); os.replace(tmp, YDB); print('여의도병하 저장', YDB)
             # 브리핑용 짧은 글 (구글 드라이브에 올려서 아침·저녁 브리핑이 읽음)
@@ -111,9 +118,9 @@ if __name__ == '__main__':
                 if not A: L.append('  없음')
                 for r, x in enumerate(A[:5], 1):
                     L.append(f"  {r}. {x['t']} {x['kind']} ({x['name'][:30]}) 종가 ${x['close']} · 거래량 {x['vol_x']}배" + (f" · {x['star_ago']}봉 전 돌파{x['star_kind']}" if k == 'ret' else '')
-                             + f" | 손절 ${x['stop']} ({x['stop_pct']}%) · 반익 ${x['half']} (+{x['half_pct']}%){' → 남은 손절 본전' if k == 'ret' else ''} · 완익 = 종가가 구름 아래 (지금 ${x['cloud']}, {x['cloud_pct']}%)")
+                             + f" · ATR {x['atr_pct']}% · 6개월 {x['r126']:+}%" + f" | 손절 ${x['stop']} ({x['stop_pct']}%) · 반익 ${x['half']} (+{x['half_pct']}%){' → 남은 손절 본전' if k == 'ret' else ''} · 완익 = 종가가 구름 아래 (지금 ${x['cloud']}, {x['cloud_pct']}%)")
                 L.append('')
-            L.append('규칙: 손절 = 종가로 깨면 전부 / 반익 = 장중 닿으면 절반 / 완익 = 종가가 구름 아래면 나머지. 시험 성적: 돌파★+절반 승률 51%·+2.9%, 돌파★★ 52%·+3.4%, 되돌림 53%·+1.4% (과거 결과, 권유 아님)')
+            L.append('규칙: 손절 = 종가로 깨면 전부 / 반익 = 장중 닿으면 절반 / 완익 = 종가가 구름 아래면 나머지. 시험 성적(이 거름망 적용): 돌파★+절반 승률 약 50%·평균 +2~5%·20일 안 최고 +13~17%, 되돌림 승률 약 55%·평균 +1~3% (과거 결과, 권유 아님)')
             open(os.path.join(ODIR, 'scan_latest.txt'), 'w', encoding='utf-8').write('\n'.join(L))
             if os.environ.get('SCAN_OUT_DIR'): open(os.path.join(ODIR, f'scan_{day}.txt'), 'w', encoding='utf-8').write('\n'.join(L))
         except Exception as e: print('여의도병하 저장 실패', e)
